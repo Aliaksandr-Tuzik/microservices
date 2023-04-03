@@ -1,5 +1,6 @@
 using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
+using PlatformService.AsyncDataServices;
 using PlatformService.Data;
 using PlatformService.Dtos;
 using PlatformService.Models;
@@ -14,15 +15,18 @@ public class PlatformsController : ControllerBase
     private readonly IPlatformRepo platformRepo;
     private readonly IMapper mapper;
     private readonly ICommandDataClient commandDataClient;
+    private readonly IMessageBusClient messageBusClient;
 
     public PlatformsController(
         IPlatformRepo platformRepo,
         IMapper mapper,
-        ICommandDataClient commandDataClient)
+        ICommandDataClient commandDataClient,
+        IMessageBusClient messageBusClient)
     {
         this.platformRepo = platformRepo;
         this.mapper = mapper;
         this.commandDataClient = commandDataClient;
+        this.messageBusClient = messageBusClient;
     }
 
     [HttpGet]
@@ -52,13 +56,28 @@ public class PlatformsController : ControllerBase
 
         var readDto = mapper.Map<PlatformReadDto>(model);
 
+        // Send sync message
         try
         {
             await commandDataClient.SendPlatformToCommand(readDto);
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"QR501: Could not send to Command Service: {ex.Message}");
+            Console.WriteLine($"QR501: Could not send sync message to Command Service: {ex.Message}");
+        }
+
+        // Send async message
+        try
+        {
+            var platformPublishedDto = mapper.Map<PlatformPublishedDto>(readDto);
+
+            platformPublishedDto.Event = "Platform_Published";
+
+            messageBusClient.PublishNewPlatform(platformPublishedDto);
+        }
+        catch (System.Exception ex)
+        {
+            Console.WriteLine($"QR501: Could not send async message to Command Service: {ex.Message}");
         }
 
         return base.CreatedAtRoute(
